@@ -1,4 +1,15 @@
+# Axelou Olympia, December 2020
+# Greece, University of Thessaly, dpt. Electrical & Computer Engineering
+#
+# Project: Spatio-temporal and spatio-textual data generator
+# Supervisor: Vassilakopoulos Michail
+#
+# This file consists of auxiliary functions that aid in the 
+# connection between the main code and the Google Maps API. In particular,
+# Google Directions API and Google Static Map API.
+
 import my_neo4j_driver
+import my_google_maps_api
 import random
 from time import sleep, time
 import datetime
@@ -6,6 +17,8 @@ import requests
 import json
 import dicttoxml
 from xml.dom.minidom import parseString
+import os
+import errno
 
 # When done:
 # DONE 1) Set region randomly (now it's only East Canada)
@@ -16,25 +29,18 @@ from xml.dom.minidom import parseString
 
 debug = False
 
-# Auxiliary Functions
+result_folder = "final_dataset\\"
 
-def GoogleDirectionsAPI(coordinates_origin, coordinates_destination):
-	url = 'https://maps.googleapis.com/maps/api/directions/json?'
-	url += 'origin=' + coordinates_origin
-	url += '&destination=' + coordinates_destination
-	url += '&mode=walking'
-	url += '&key=AIzaSyCCDywQA7ze0vWFc8koyTJqD6MVSXm7PK8'
+if not os.path.exists(os.path.dirname(result_folder)):
+    try:
+        os.makedirs(os.path.dirname(result_folder))
+    except OSError as exception:
+        raise
 
-	response = requests.get(url)
-	json_data = json.loads(response.text)
+# # # # # # # # # # Auxiliary Functions # # # # # # # # # #
 
-	distance = -1
-	duration = -1
-	if json_data['status'] == 'OK':
-		distance = json_data['routes'][0]['legs'][0]['distance']['value']
-		duration = json_data['routes'][0]['legs'][0]['duration']['value']
-	return (distance, duration)
 
+# This function returns all possible categories of the POIs available
 def getAllCategories():
 	return ["Shopping Stores",
 			  "Services",
@@ -52,6 +58,8 @@ def getAllCategories():
 			  "Education",
 			  "Entertainment"]
 
+# This function returns a dictionary with all the regions as key and
+# as value a list with all the states that are in the corresponding region
 def getAllRegions():
 	regions = {}
 	regions["WestUSA"] = ["NV", "CA", "WA", "OR", "HI"]
@@ -64,14 +72,18 @@ def getAllRegions():
 	regions["WestCanada"] = ["AB", "BC", "YT", "AK"]
 	return regions
 
+# This function returns in a dictionary the possibilities for each
+# POI category for both genders male and female.
+# As examined in statistical surveys, some categories seemed to be 
+# chosen in the same frequency by the people. The categorization is as follows:
+# {Shopping Stores, Services, Supermarkets, Health & Medical}
+# {Religion}
+# {Beauty Salons}
+# {Country Clubs, Gyms, Parks, Entertainment, Museums}
+# {Restaurants, Bars, Cafes}
+# {Education}
+# Lastly, there is the category "Home" which was indirectly derived from the surveys
 def getAllCategoryPossibilities():
-	# Shopping Stores, Services, Supermarkets, Health & Medical
-	# Religion
-	# Beauty Salons
-	# Country Clubs, Gyms, Parks, Entertainment, Museums
-	# Restaurants, Bars, Cafes
-	# Education
-
 	m_categ_poss = {'Shopping Stores':5.82,
 					'Supermarkets':5.82,
 					'Health & Medical':5.82,
@@ -107,6 +119,8 @@ def getAllCategoryPossibilities():
 					'Home': 2.49}
 	return {'m':m_categ_poss, 'f':f_categ_poss}
 
+# This function returns the possibility of a person to work 
+# and the mean duration of it for the given level of the person's education
 def getWorkingPossibilityAndDuration(education):
 	workingPossibilities = {}
 	workingPossibilities[0] = 82.2
@@ -124,13 +138,16 @@ def getWorkingPossibilityAndDuration(education):
 
 	return (workingPossibilities[education], workingDuration[education])
 
+# This function returns a dictionary with all the levels of education
 def getAllEducationDegrees():
 	return {0: "Less Than High School Diploma",
-						1: "High School Graduates, no college",
-						2: "Some college or associate degree",
-						3: "Bachelor's Degree",
-						4: "Advanced Degree"}
+			1: "High School Graduates, no college",
+			2: "Some college or associate degree",
+			3: "Bachelor's Degree",
+			4: "Advanced Degree"}
 
+# This function returns the duration of each category of activity
+# for the given gender and age, based on surveys
 def getAllCategoryDurations(gender, age):
 	f_15_24 = {'Shopping Stores':0.84*3600,
 				'Supermarkets':0.84*3600,
@@ -275,7 +292,9 @@ def getAllCategoryDurations(gender, age):
 		elif age < 65:return m_45_64
 		else: return m_65plus
 
-def findPossibilitiesFromProfile(categories, userProfile):
+# This function gets as input the profile of the virtual user 
+# and it returns the possibilities and the mean durations for each category
+def findPossibilitiesFromProfile(userProfile):
 	# Get the user's profile
 	(age, gender, education) = userProfile
 	
@@ -287,7 +306,15 @@ def findPossibilitiesFromProfile(categories, userProfile):
 	
 	return (categPossibilities[gender], meanCheckInDur)
 
-def setup_user_profil(categories, regions):
+# This function gets as input all regions.
+# It randomly sets the user's profile (gender, age and education level),
+# and uses other aux functions to find the possibilities and the durations
+# of the categories.
+# Also, it performs a query in the Neo4j database to randomly set the Home,
+# finds the possibility for the given profile to work and sets a random POI
+# of the Neo4j database to be the workplace of the user.
+# It returns the possibilities and the durations, home and workplace.
+def setup_user_profil(regions):
 	# Constants
 	EducationDegrees = getAllEducationDegrees()
 	
@@ -299,7 +326,7 @@ def setup_user_profil(categories, regions):
 	if debug:
 		print("Age:", age, " - Gender:", gender, " - Education:", education)
 
-	(categPossibilities, meanCheckInDur) = findPossibilitiesFromProfile(categories, userProfile)
+	(categPossibilities, meanCheckInDur) = findPossibilitiesFromProfile(userProfile)
 		
 	# Home
 	home, region = my_neo4j_driver.neo4j_find_random_poi(regions)
@@ -319,9 +346,13 @@ def setup_user_profil(categories, regions):
 
 # Main Functions
 
-def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
-	# debug = False
-		
+# This function creates the daily trajectory of a user
+# It takes as input the categories of activities, 
+# some constants set by the programmer (e.g. max distance, number of check-ins)
+# and some variables for the current user like home and workplace, 
+# the regions he's in, the POIs around his home etc...
+# It returns the detailed trajectory (places visited, check-in & transport durations)
+def findTrajectoryPerDay(categories, input_consts, input_vars):
 	# Constants to use
 	(maxDist, startTime, endTime, chkNum, stdDevCheckIn) = input_consts
 	
@@ -335,10 +366,12 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 	checkInTimes = {} # All the check in timestamps in the day
 	checkOutTimes = {} # All the check out timestamps in the day
 	transportDurations = {} # All the durations of movement in the day
-	categoriesVisited = []
+	transportDistances = {} # All the distances of movement in the day
+	# categoriesVisited = []
 
 	# Initializations of temp variables
 	duration = 0    # The duration of the trajectory to the POI (sec)
+	distance = 0    # The distance of the trajectory to the POI (m)
 	checkInDur = 0  # The duration the user spent in a POI (sec)
 	checkInTime = 0 # The NON-relative time in the day when the check in starts (sec)
 	checkOutTime = 0 # The NON-relative time in the day when the check in ends (sec)
@@ -348,15 +381,13 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 		print("\nGoing to create trajectory now!!")
 
 	##################################################
-	# Step 1: First POI of the day
+	# Step 1: Set home
 
-	# poisVisited[0] = home
 	p = home
-	# poisInRange.remove(p)
 	timeBefore = startTime
 
 	##################################################
-	# Step 2: Rest of POIs of the day
+	# Step 2: Find the trajectory of the day
 	if debug:
 		print("keys:")
 		print(list(categPossibilities.keys()))
@@ -373,6 +404,7 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 	if debug:
 		print("predictedTrajectory")
 		print(predictedTrajectory)
+	
 	for i in range(maxChkNum):
 		if debug:
 			sleep(0.5)
@@ -392,10 +424,12 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 		
 		if currentCategory == "Work":
 			newP = workPlace
-			if debug:print("Selected workPlace:", workPlace)
+			if debug:
+				print("Selected workPlace:", workPlace)
 		elif currentCategory == "Home":
 			newP = home
-			if debug:print("Selected home:", home)
+			if debug:
+				print("Selected home:", home)
 		else:
 			for poi in poisInRange:
 				if currentCategory in poi['categories']:
@@ -403,19 +437,21 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 					break
 		
 		if not newP:
-			if debug:print("RANDOM POI!!!!!!!!!!!")
+			if debug:
+				print("Didn't find a poi of this category. Going to choose one randomly.")
 			newP = random.choice(poisInRange)
 
 		if debug:
 			print("\n", str(i), ": ", newP['name'], " - ", newP['categories'])
+		
 		# Find checkOutTime:
 		# Get distance & duration from p to newP (google maps directions API)
-		googleDirections_P_str = str(p['coordinates'].latitude) + "," + str(p['coordinates'].longitude)
-		googleDirections_NewP_str = str(newP['coordinates'].latitude) + "," + str(newP['coordinates'].longitude)
-		duration = 20
-		# (_, duration) = GoogleDirectionsAPI(googleDirections_P_str,googleDirections_NewP_str)
+		coordinates_P = str(p['coordinates'].latitude) + "," + str(p['coordinates'].longitude)
+		coordinates_newP = str(newP['coordinates'].latitude) + "," + str(newP['coordinates'].longitude)
+		(distance, duration) = my_google_maps_api.google_directions_api(coordinates_P,coordinates_newP)
 		if currentCategory == "Work":
-			if debug:print("\nWORK ", workingDur)
+			if debug:
+				print("\nWORK ", workingDur)
 			while True:
 				checkInDur = int(random.gauss(workingDur, stdDevCheckIn))
 				if checkInDur > 0:
@@ -450,11 +486,12 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 		checkInTimes[i] = checkInTime
 		checkOutTimes[i] = checkOutTime
 		transportDurations[i] = duration
-		if debug:
-			print("categories: ", newP['categories'])
-			for categ in newP['categories']:
-				if categ not in categoriesVisited:categoriesVisited.append(categ)
-			print(categoriesVisited)
+		transportDistances[i] = distance
+		# if debug:
+		# 	print("categories: ", newP['categories'])
+		# for categ in newP['categories']:
+		# 	if categ not in categoriesVisited:categoriesVisited.append(categ)
+		# print(categoriesVisited)
 		p = newP
 		if p in poisInRange:
 			poisInRange.remove(p)
@@ -462,25 +499,24 @@ def findTrajectoryPerDay(categories, regions, input_consts, input_vars):
 	##################################################
 	# Step 3: Sum up of the trajectory - Maps Static API
 
+	# APOFASISE AN THA BRISKEI TO STATIC MAP EDW H OXI
+
 	if debug:
 		print("\n\nStep 3: Sum up of the trajectory:")
 		sleep(1)
-
 		print("\tAll the POIs that were visited:")
 		for i in range(len(poisVisited)):
 			print(str(datetime.timedelta(seconds=checkInTimes[i])), "o'clock", "\t - ", str(datetime.timedelta(seconds=checkOutTimes[i])), "o'clock", "\t : ", poisVisited[i]['name'], " - ", poisVisited[i]['categories'])
-
 		print("\tAll the durations that were visited:")
 		for i in range(len(poisVisited)):
 			print(str(datetime.timedelta(seconds=transportDurations[i])))
 
-	# print("\tGoing to create the Static Map now.")
+	return (poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances)
 
-	return (poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations)
 
 def generate_trajectories_per_user(categories, regions, input_consts, user_no, time_period, json_file):
 	# Variables 
-	(userProfile, home, region, work, categPossibilities, meanCheckInDur) = setup_user_profil(categories, regions)
+	(userProfile, home, region, work, categPossibilities, meanCheckInDur) = setup_user_profil(regions)
 	
 	poisInRange = my_neo4j_driver.neo4j_find_POIs_in_range(home, input_consts[0], region)
 	
@@ -490,65 +526,48 @@ def generate_trajectories_per_user(categories, regions, input_consts, user_no, t
 	purpose = {}
 	checkInTimes = {}
 	checkOutTimes = {}
-	durations = {}
+	transportDurations = {}
+	transportDistances = {}
 
-	# with open('dataset.xml', 'w') as xml_file:
-	# userStr = "user_no:" + str(user_no)
 	userDict = {"user":str(user_no)}
 	userDict["days"] = {} 
-	# print("- User: ", user_no)
 	if debug:
 		print(userDict)
 	
 	for day in range(time_period):
-		(poisVisited[day], purpose[day], checkInTimes[day], checkOutTimes[day], durations[day]) = findTrajectoryPerDay(categories, regions, input_consts, input_vars)
+		(poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances) = findTrajectoryPerDay(categories, input_consts, input_vars)
 
 		userDict["days"][day] = {}
+		userDict["days"][day]["total_pois_visited"]=len(poisVisited)
+		userDict["days"][day]["pois_visited"]={}
+
 		if debug:
 			print("- Day", day)
-			print("number of pois: ", len(poisVisited[day]))
+			print("number of pois: ", len(poisVisited))
 			print(userDict['days'])
-		for i in range(len(poisVisited[day])):
-			# POIstr  = str(datetime.timedelta(seconds=checkInTimes[day][i]))  + "o'clock" + "\t - "
-			# POIstr += str(datetime.timedelta(seconds=checkOutTimes[day][i])) + "o'clock" + "\t - Action: "
-			# POIstr += purpose[day][i] + "\t : "
-			# POIstr += poisVisited[day][i]['name']
-			# print(POIstr)
-			userDict["days"][day][i] = {}
-			userDict["days"][day][i]["POI number"] = str(day)
-			userDict["days"][day][i]["checkin"] = checkInTimes[day][i]
-			userDict["days"][day][i]["checkout"] = checkOutTimes[day][i]
-			userDict["days"][day][i]["purpose"] = purpose[day][i]
-			userDict["days"][day][i]["POI"] = {}
+		for poi in range(len(poisVisited)):
+			userDict["days"][day]["pois_visited"][poi] = {}
+			userDict["days"][day]["pois_visited"][poi]["transport_duration"] = transportDurations[poi]
+			userDict["days"][day]["pois_visited"][poi]["transport_distance"] = transportDistances[poi]
+			userDict["days"][day]["pois_visited"][poi]["checkin"] = checkInTimes[poi]
+			userDict["days"][day]["pois_visited"][poi]["checkout"] = checkOutTimes[poi]
+			userDict["days"][day]["pois_visited"][poi]["purpose"] = purpose[poi]
+			userDict["days"][day]["pois_visited"][poi]["business_details"] = {}
 
-			userDict["days"][day][i]["POI"]['name'] = poisVisited[day][i]['name']
-			userDict["days"][day][i]["POI"]['business_id'] = poisVisited[day][i]['business_id']
-			userDict["days"][day][i]["POI"]['state'] = poisVisited[day][i]['state']
-			userDict["days"][day][i]["POI"]['postal_code'] = poisVisited[day][i]['postal_code']
-			userDict["days"][day][i]["POI"]['city'] = poisVisited[day][i]['city']
-			userDict["days"][day][i]["POI"]['address'] = poisVisited[day][i]['address']
-			userDict["days"][day][i]["POI"]['coordinates'] = poisVisited[day][i]['coordinates']
-			userDict["days"][day][i]["POI"]['categories'] = poisVisited[day][i]['categories']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['name'] = poisVisited[poi]['name']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['business_id'] = poisVisited[poi]['business_id']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['state'] = poisVisited[poi]['state']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['postal_code'] = poisVisited[poi]['postal_code']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['city'] = poisVisited[poi]['city']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['address'] = poisVisited[poi]['address']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['coordinates'] = poisVisited[poi]['coordinates']
+			userDict["days"][day]["pois_visited"][poi]["business_details"]['categories'] = poisVisited[poi]['categories']
 			if debug:
-				print(userDict['days'][day][i])
-
-
-			# xml_file.write(POIxml)
-			# print(parseString(POIxml.decode('utf-8')).toprettyxml())
-			# xml_file.write("\n")
-			# print("\n")
-			# print(str(datetime.timedelta(seconds=checkInTimes[day][i])), "o'clock", "\t - ", str(datetime.timedelta(seconds=checkOutTimes[day][i])), "o'clock", "\t - Action: " , purpose[day][i], "\t\t : ", poisVisited[day][i]['name'], " - ", poisVisited[day][i]['categories'])
-
-	# print(userDict)
+				print(userDict['days'][day]["pois_visited"][poi])
+				print(poisVisited[poi]['name'], ":", str(poisVisited[poi]['coordinates'].latitude) + "," + str(str(poisVisited[poi]['coordinates'].longitude)))
+		my_google_maps_api.static_map_api(str(result_folder+"staticmap_"), user_no, day, poisVisited) # pois visited this day.
 	userJSON = json.dumps(userDict)
 	json_file.write(userJSON+"\n")
-	# userXML = dicttoxml.dicttoxml(userDict, attr_type=False)
-	# xml_file.write(userXML.decode('utf-8')+"\n")
-	# print("\tAll the durations that were visited:")
-	# for i in range(1, len(poisVisited[day])):
-	# 	print(str(datetime.timedelta(seconds=durations[day][i])))
-
-	# print("Done")
 
 def data_generator():
 	# The final categories are going to be used later on
@@ -563,14 +582,16 @@ def data_generator():
 	stdDevCheckIn = 3600 # 1 hour standard deviation
 	DAYSPER = {'month':30, 'week':7, 'day':1}
 	time_period = DAYSPER['month']
-	NumberOfUsers = 100
+	NumberOfUsers = 50
 	input_consts = (maxDist, startTime, endTime, chkNum, stdDevCheckIn)
 	
-	with open('dataset.json', 'w', encoding='utf-8') as json_file:
+	with open(result_folder + 'dataset.json', 'w', encoding='utf-8') as json_file:
 		for user_no in range(NumberOfUsers):
 			generate_trajectories_per_user(final_categories, regions, input_consts, user_no, time_period, json_file)
+			# if user_no % 10 == 0:print("user:", user_no)
 	print("Done")
 if __name__ == '__main__':
 	start_time = time()
 	data_generator()
 	print("--- %s seconds ---" % (time() - start_time))
+
