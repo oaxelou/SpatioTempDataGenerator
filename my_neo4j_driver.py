@@ -1,63 +1,62 @@
+# Axelou Olympia, December 2020
+# Greece, University of Thessaly, dpt. Electrical & Computer Engineering
+#
+# Project: Spatio-temporal and spatio-textual data generator
+# Supervisor: Vassilakopoulos Michail
+#
+# This file consists of auxiliary scripts and functions that aid in the 
+# connection between the main code and the Neo4j database.
+
 from neo4j import GraphDatabase
+from time import time
 import random
 
-# add try block here
-driver = GraphDatabase.driver("neo4j://localhost:7687", auth=("neo4j", "12345"))
-print("Connected to the db")
+debug=False
 
-def __find_random_POI__(tx, region):
-	# print("Going to search for a POI in", region)
-	query_str  = "match (n:" + region + ") with n, rand() as rand_num "
-	query_str += "return n order by rand_num limit 1;"
-	# query_str  = "match (n:" + region + ") "
-	# query_str += "return n limit 1;"
-	result = tx.run(query_str)
-	for record in result:
-		home = record['n']
-		break # there is only one result anyways
-	# print(home)
-	# for k in home:
-	# 	print(k, ": ", home[k])
-	return home
+try:
+	driver = GraphDatabase.driver("neo4j://localhost:7687", auth=("neo4j", "12345"))
+except Exception as e:
+	print("Problem connecting to Neo4j database.")
+	exit()
 
+if debug:
+	print("Connected to the db")
+
+# This function has a double purpose:
+# 1) It can be used to randomly set the workplace of a user.
+#    To do that, the second parameter must be set to a valid region
+# 2) It can be used to randomly set the home of a user.
+#    For this option, the second parameter should not be set. This is because
+#    this function also randomly chooses the region of the user's home
 def neo4j_find_random_poi(regions, region=None):
 	if not region:
 		region = random.choice(list(regions.keys()))
-		# region = "EastCanada"
-		print("Just chose ", region)
-	# else:
-	# 	print("Did not choose ", region)
+		if debug:
+			print("Just chose ", region)
 	randomPOI = None
 	with driver.session() as session:
-		randomPOI = session.write_transaction(__find_random_POI__, region)
-	# if randomPOI:
-	# 	print(randomPOI['name'])
-	# else:
-	# 	print("No random POI could be found.")
+		query_str  = "match (n:" + region + ") with n, rand() as rand_num "
+		query_str += "return n order by rand_num limit 1;"
+		result = session.run(query_str)
+		for record in result:
+			home = record['n']
+			randomPOI = home
+			break # there is only one result anyways
 	return randomPOI, region
 
-def __find_POIs_in_range__(tx, centralPOI, radius, region):
-	# print("Going to search for POIs in range of " + str(radius) + " for POI: ", centralPOI)
-	query_str  = "match (n:" + region + "), (m:" + region + ") " 
-	query_str += "where n.business_id='" + centralPOI['business_id'] + "' and n <> m "
-	query_str += "and distance(n.coordinates, m.coordinates) < " + str(radius) + " return m;"
-	result = tx.run(query_str)
-	pois = []
-	for record in result:
-		pois.append(record['m'])
-	# print("In aux: ", str(len(pois)))
-	# return {i : pois[i-1] for i in range(1, len(pois)+1)}
-	return pois
-
+# This function finds all POIs of a specific region that are around 
+# a centralPOI set by the 1st parameter and inside the imaginary circle 
+# with radius the 2nd parameter of the function. 
 def neo4j_find_POIs_in_range(centralPOI, radius, region):
-	# print("Going to find POIs in range of " + str(radius) + " for POI: ", centralPOI)
 	pois_in_range = None
 	with driver.session() as session:
-		pois_in_range = session.write_transaction(__find_POIs_in_range__, centralPOI, radius, region)
-	# if pois_in_range:
-	# 	print("The number of POIs is: ", str(len(pois_in_range)))
-	# else:
-	# 	print("No pois in range where found")
+		query_str  = "match (n:" + region + "), (m:" + region + ") " 
+		query_str += "where n.business_id='" + centralPOI['business_id'] + "' and n <> m "
+		query_str += "and distance(n.coordinates, m.coordinates) < " + str(radius) + " return m;"
+		result = session.run(query_str)
+		pois_in_range = []
+		for record in result:
+			pois_in_range.append(record['m'])
 	return pois_in_range
 
 def neo4j_close_connection():
@@ -65,9 +64,9 @@ def neo4j_close_connection():
 
 if __name__ == '__main__':
 	region = "EastCanada"
-	# print("Just chose ", region)
-	randomPOI = None
-	with driver.session() as session:
-		randomPOI = session.write_transaction(__find_random_POI__, region)
-
+	
+	start_time = time()
+	randomPOI,_ = neo4j_find_random_poi(None, region)
 	print(randomPOI['coordinates'].latitude, ",", randomPOI['coordinates'].longitude)
+	print("--- %s seconds ---" % (time() - start_time))
+
