@@ -581,7 +581,7 @@ def data_generator():
 	stdDevCheckIn = 3600 # 1 hour standard deviation
 	DAYSPER = {'month':30, 'week':7, 'day':1}
 	time_period = DAYSPER['month']
-	NumberOfUsers = 1
+	NumberOfUsers = 100
 	input_consts = (maxDist, startTime, endTime, chkNum, stdDevCheckIn)
 	
 	NumberOfThreads = 1
