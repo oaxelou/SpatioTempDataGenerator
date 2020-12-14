@@ -7,7 +7,7 @@
 # This file consists of auxiliary scripts and functions that aid in the 
 # connection between the main code and the Neo4j database.
 
-from neo4j import GraphDatabase
+from neo4j import GraphDatabase, READ_ACCESS
 from time import time
 import random
 
@@ -34,7 +34,7 @@ def neo4j_find_random_poi(regions, region=None):
 		if debug:
 			print("Just chose ", region)
 	randomPOI = None
-	with driver.session() as session:
+	with driver.session(default_access_mode=READ_ACCESS) as session:
 		query_str  = "match (n:" + region + ") with n, rand() as rand_num "
 		query_str += "return n order by rand_num limit 1;"
 		result = session.run(query_str)
@@ -49,7 +49,7 @@ def neo4j_find_random_poi(regions, region=None):
 # with radius the 2nd parameter of the function. 
 def neo4j_find_POIs_in_range(centralPOI, radius, region):
 	pois_in_range = None
-	with driver.session() as session:
+	with driver.session(default_access_mode=READ_ACCESS) as session:
 		query_str  = "match (n:" + region + "), (m:" + region + ") " 
 		query_str += "where n.business_id='" + centralPOI['business_id'] + "' and n <> m "
 		query_str += "and distance(n.coordinates, m.coordinates) < " + str(radius) + " return m;"
