@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.9
+
 # Axelou Olympia, December 2020
 # Greece, University of Thessaly, dpt. Electrical & Computer Engineering
 #
@@ -7,6 +9,11 @@
 # This file consists of auxiliary functions that aid in the 
 # connection between the main code and the Google Maps API. In particular,
 # Google Directions API and Google Static Map API.
+#
+# Example of usage:
+# >$ python propabilities.py -U 2000 -s 8000
+# The above command specifies that the script will run for 2000 users and 
+# that the users' IDs will be in the range [8000, 10000) 
 
 import my_neo4j_driver
 import my_google_maps_api
@@ -19,26 +26,82 @@ import dicttoxml
 from xml.dom.minidom import parseString
 import os
 import errno
-
-# When done:
-# DONE 1) Set region randomly (now it's only East Canada)
-# 2) Google Directions set API (now static so that we don't get charged)
-# DONE 3) Xrisimopoiise gia tis pithanotites:
-# 	import numpy
-# 	numpy.random.choice(numpy.arange())
+import argparse
 
 debug = False
-
-result_folder = "final_dataset\\"
+result_folder = "final_dataset/"
 
 if not os.path.exists(os.path.dirname(result_folder)):
     try:
         os.makedirs(os.path.dirname(result_folder))
     except OSError as exception:
         raise
+if not os.path.exists(os.path.dirname(result_folder+"images/")):
+    try:
+        os.makedirs(os.path.dirname(result_folder+"images/"))
+    except OSError as exception:
+        raise
+
+# # # # # # # # # # Code for the arguments # # # # # # # # # # 
+
+def positive_int(value):
+    try:
+        value = int(value)
+        if value <= 0:
+            raise argparse.ArgumentTypeError("{} is not a positive integer".format(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError("{} is not an integer".format(value))
+    return value
+
+def positive_float(value):
+    try:
+        value = float(value)
+        if value <= 0:
+            raise argparse.ArgumentTypeError("{} is not a positive decimal".format(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError("{} is not a decimal".format(value))
+    return value
+
+def non_negative_int(value):
+    try:
+        value = int(value)
+        if value < 0:
+            raise argparse.ArgumentTypeError("{} is not a positive integer".format(value))
+    except ValueError:
+        raise argparse.ArgumentTypeError("{} is not an integer".format(value))
+    return value
+
+parser = argparse.ArgumentParser()
+helpString = "The maximum distance of a POI from home (positive integer, in meters)"
+parser.add_argument("-M", "--maxDistance", help=helpString, type=positive_int)
+helpString = "The start of the day (positive integer, in seconds from time 00:00)"
+parser.add_argument("-S", "--startTime", help=helpString, type=positive_int)
+helpString  = "The end of the day (positive integer, in seconds from time 00:00)"
+parser.add_argument("-E", "--endTime", help=helpString, type=positive_int)
+helpString  = "The maximum number of check-ins per day per user"
+helpString += "(positive integer)"
+parser.add_argument("-C", "--checkInNum", help=helpString, type=positive_int)
+helpString  = "The standard deviation for the normal distribution of the"
+helpString += " check-ins' duration (positive number)"
+parser.add_argument("-D", "--stdDev", help=helpString, type=positive_float)
+helpString  = "The period of time for which the generator will produce"
+helpString +=" daily routes (positive integer, in days)"
+parser.add_argument("-T", "--timePeriod", help=helpString, type=positive_int)
+helpString  = "The number of virtual users that will be generated."
+helpString += "(integer, positive)"
+parser.add_argument("-U", "--usersNum", help=helpString, type=positive_int)
+helpString  = "The starting ID of virtual users that will be generated "
+helpString += "(integer, non-negative)"
+parser.add_argument("-s", "--startUserNum", help=helpString, type=non_negative_int)
+helpString  = "The ending ID of virtual users that will be generated."
+helpString += " If -s is not specified then this argument will be ignored."
+helpString += " Also, this argument has to be an integer larger than -s "
+helpString += "(integer, non-negative)"
+parser.add_argument("-e", "--endUserNum", help=helpString, type=non_negative_int)
+
+# # # # # # # # # # End of code for the arguments # # # # # # # # # # 
 
 # # # # # # # # # # Auxiliary Functions # # # # # # # # # #
-
 
 # This function returns all possible categories of the POIs available
 def getAllCategories():
@@ -306,6 +369,10 @@ def findPossibilitiesFromProfile(userProfile):
 	
 	return (categPossibilities[gender], meanCheckInDur)
 
+# # # # # # # # # # End of Auxiliary Functions # # # # # # # # # #
+
+# # # # # # # # # # Main Functions # # # # # # # # # #
+
 # This function gets as input all regions.
 # It randomly sets the user's profile (gender, age and education level),
 # and uses other aux functions to find the possibilities and the durations
@@ -565,7 +632,7 @@ def generate_trajectories_per_user(categories, regions, input_consts, user_no, t
 			if debug:
 				print(userDict['days'][day]["pois_visited"][poi])
 				print(poisVisited[poi]['name'], ":", str(poisVisited[poi]['coordinates'].latitude) + "," + str(str(poisVisited[poi]['coordinates'].longitude)))
-		my_google_maps_api.static_map_api(str(result_folder+"staticmap_"), user_no, day, poisVisited) # pois visited this day.
+		my_google_maps_api.static_map_api(str(result_folder+"images/staticmap_"), user_no, day, poisVisited) # pois visited this day.
 	userJSON = json.dumps(userDict)
 	json_file.write(userJSON+"\n")
 
@@ -574,22 +641,56 @@ def data_generator():
 	final_categories = getAllCategories()
 	regions = getAllRegions()
 
+	# Get the arguments 
+	args = parser.parse_args()
+	if args.endUserNum and not args.startUserNum:
+		print("Must also set --startUserNum parameter with --endUserNum")
+		exit()
+	elif args.endUserNum and args.startUserNum and args.startUserNum > args.endUserNum:
+		print("User's start number must be smaller than or equal to the end number.")
+		exit()
+
 	# Set the constants
-	maxDist = 20000 # The max distance a user can go from his home
-	startTime = 28800 # = 8:00 When the user starts visiting places (sec)
-	endTime = 79200 # = 22:00 The end of the day (sec)
-	chkNum = 10 # The max number of checkins 
-	stdDevCheckIn = 3600 # 1 hour standard deviation
-	DAYSPER = {'month':30, 'week':7, 'day':1}
-	time_period = DAYSPER['month']
-	NumberOfUsers = 50
-	input_consts = (maxDist, startTime, endTime, chkNum, stdDevCheckIn)
+	DAYSPER           = {'2months':60, 'month':30, 'week':7, 'day':1}
+	DEFAULT_MAXDIST   = 20000 # The max distance a user can go from his home
+	DEFAULT_STARTTIME = 28800 # = 8:00 When the user starts visiting places (sec)
+	DEFAULT_ENDTTIME  = 79200 # = 22:00 The end of the day (sec)
+	DEFAULT_CHKINNUM  = 10 # The max number of checkins 
+	DEFAULT_STDDEV    = 3600 # 1 hour standard deviation
+	DEFAULT_USERSNUM  = 50
+
+	maxDist       = args.maxDistance  if args.maxDistance  else DEFAULT_MAXDIST
+	startTime     = args.startTime    if args.startTime    else DEFAULT_STARTTIME
+	endTime       = args.endTime      if args.endTime      else DEFAULT_ENDTTIME
+	chkNum        = args.checkInNum   if args.checkInNum   else DEFAULT_CHKINNUM
+	stdDevCheckIn = args.stdDev       if args.stdDev       else DEFAULT_STDDEV
+	numberOfUsers = args.usersNum     if args.usersNum     else DEFAULT_USERSNUM
+	time_period   = args.timePeriod   if args.timePeriod   else DAYSPER['2months']
+	startUser     = args.startUserNum if args.startUserNum else 0
+	endUser       = args.endUserNum   if args.endUserNum   else startUser+numberOfUsers
+
+	print(maxDist)
+	print(startTime)
+	print(endTime)
+	print(chkNum)
+	print(stdDevCheckIn)
+	print(time_period)
+	print(numberOfUsers)
+	print(startUser)
+	print(endUser)
+	exit()
 	
-	with open(result_folder + 'dataset.json', 'w', encoding='utf-8') as json_file:
-		for user_no in range(NumberOfUsers):
+	input_consts  = (maxDist, startTime, endTime, chkNum, stdDevCheckIn)
+	
+	json_fle = "dataset_" + str(startUser) + "_" + str(endUser) + ".json"
+	with open(result_folder + json_fle, 'w', encoding='utf-8') as json_file:
+		for user_no in range(startUser, endUser):
 			generate_trajectories_per_user(final_categories, regions, input_consts, user_no, time_period, json_file)
-			# if user_no % 10 == 0:print("user:", user_no)
+			if user_no % 10 == 0:print("user:", user_no)
 	print("Done")
+
+# # # # # # # # # # End of Main Functions # # # # # # # # # #
+
 if __name__ == '__main__':
 	start_time = time()
 	data_generator()
