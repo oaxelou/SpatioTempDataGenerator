@@ -14,10 +14,8 @@ import string
 
 alphabet = dict(zip(range(0,26), string.ascii_uppercase))
 
-apiKey = "&key=AIzaSyCCDywQA7ze0vWFc8koyTJqD6MVSXm7PK8"
-randomApiKey = "&key=AIzaSyA3kg7YWugGl1lTXmAmaBGPNhDW9pEh5bo"
-
-allow_api_calls = False
+apiKey = "&key=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+allow_api_calls = True
 debug=False
 
 # This function gets as input the coordinates of two POIs, performs
@@ -28,26 +26,29 @@ def google_directions_api(coordinates_origin, coordinates_destination):
 	url += 'origin=' + coordinates_origin
 	url += '&destination=' + coordinates_destination
 	#url += '&mode=walking' # defaults to driving
-	url += randomApiKey
-
+	url += apiKey
+	# print(url)
 	if allow_api_calls:
 		response = requests.get(url)
 		json_data = json.loads(response.text)
 
 		distance = -1
 		duration = -1
+		# print(json_data['status'])
 		if json_data['status'] == 'OK':
 			distance = json_data['routes'][0]['legs'][0]['distance']['value']
 			duration = json_data['routes'][0]['legs'][0]['duration']['value']
 	else:
 		distance = 0
 		duration = 300
+	# print(distance, duration)
 	return (distance, duration)
 
 # This function gets as input the POIs visited by the user for a day and 
 # uses Google Static Maps API in order to visualize the user's daily route
 # on a map. The map is stored as an image.
 def static_map_api(filePath, userno, day, poisVisited):
+	isOK = True
 	if debug:
 		print("\n\nIn createMap:")
 	url  = 'https://maps.googleapis.com/maps/api/staticmap?'
@@ -59,12 +60,15 @@ def static_map_api(filePath, userno, day, poisVisited):
 		url += '&markers=label:'
 		url += str(alphabet[poi])
 		url += '%7C' + coord
-	url += randomApiKey
+	url += apiKey
 	
-	filename = filePath + str(userno) + "_" + str(day) + ".png"
+	filename = filePath + str(day) + ".png"
 	
 	if allow_api_calls:
 		response = requests.get(url)
+		if response.status_code == 403:
+			isOK = False
+			return isOK
 		with open(filename, 'wb') as file:
 		   file.write(response.content)
 	else:
@@ -73,6 +77,7 @@ def static_map_api(filePath, userno, day, poisVisited):
 			print(filename)
 		with open(filename, 'w') as file:
 			file.write("allow_api_calls=False")
+	return isOK
 
 if __name__ == '__main__':
 	# Static Map Code
@@ -91,12 +96,8 @@ if __name__ == '__main__':
 	url += '&key=AIzaSyA3kg7YWugGl1lTXmAmaBGPNhDW9pEh5bo'
 
 	response = requests.get(url)
-	# json_data = json.loads(response.text)
 
-	print(response.content)
-	# if json_data['status'] == 'OK':
-	# 	distance = json_data['routes'][0]['legs'][0]['distance']['value']
-	# 	duration = json_data['routes'][0]['legs'][0]['duration']['value']
+	print(response.status_code)
 	with open('hyderabad.png', 'wb') as file:
 	   # writing data into the file
 	   file.write(response.content)
