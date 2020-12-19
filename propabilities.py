@@ -25,11 +25,12 @@ import json
 import dicttoxml
 from xml.dom.minidom import parseString
 import os
+import shutil
 import errno
 import argparse
 
 debug = False
-result_folder = "final_dataset/"
+result_folder = "output_dataset/"
 
 if not os.path.exists(os.path.dirname(result_folder)):
     try:
@@ -402,7 +403,7 @@ def setup_user_profil(regions):
 
 	# Work
 	workingPossibility, workingDuration = getWorkingPossibilityAndDuration(education)
-	isWorking = random.choices([True, False], [workingPossibility, 100-workingPossibility])
+	isWorking = random.choices([True, False], [workingPossibility, 100-workingPossibility])[0]
 	workPlace = None
 	if isWorking: (workPlace, _) = my_neo4j_driver.neo4j_find_random_poi(regions, region)
 	work = (isWorking, workPlace, workingDuration)
@@ -434,7 +435,6 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 	checkOutTimes = {} # All the check out timestamps in the day
 	transportDurations = {} # All the durations of movement in the day
 	transportDistances = {} # All the distances of movement in the day
-	# categoriesVisited = []
 
 	# Initializations of temp variables
 	duration = 0    # The duration of the trajectory to the POI (sec)
@@ -468,6 +468,7 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 	else:
 		predictedTrajectory = random.choices(list(categPossibilities.keys()), list(categPossibilities.values()), k=chkNum)
 		maxChkNum = chkNum
+
 	if debug:
 		print("predictedTrajectory")
 		print(predictedTrajectory)
@@ -481,10 +482,14 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 		if not poisInRange: break
 		newP = None
 
-		if isWorking and i == 0:
-			currentCategory = "Work"
+		if isWorking:
+			if i==0:
+				currentCategory = "Work"
+			else:
+				currentCategory = predictedTrajectory[i-1]
 		else:
-			currentCategory = predictedTrajectory[i-1]
+			currentCategory = predictedTrajectory[i]
+
 		if debug:
 			print("\nGoing to search for category:", currentCategory)
 			print("Categories:", categPossibilities)
@@ -516,6 +521,9 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 		coordinates_P = str(p['coordinates'].latitude) + "," + str(p['coordinates'].longitude)
 		coordinates_newP = str(newP['coordinates'].latitude) + "," + str(newP['coordinates'].longitude)
 		(distance, duration) = my_google_maps_api.google_directions_api(coordinates_P,coordinates_newP)
+		if distance == -1 or duration == -1:
+			isOK = False
+			return (isOK, {}, {}, {}, {}, {}, {})
 		if currentCategory == "Work":
 			if debug:
 				print("\nWORK ", workingDur)
@@ -546,6 +554,7 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 			print("\t+ duration:", duration, "(sec) = ", str(datetime.timedelta(seconds=duration)), "o'clock")
 			print("\t+ checkInDur:", checkInDur, "(sec) = ",str(datetime.timedelta(seconds=checkInDur)), "o'clock")
 			print("\t= checkOutTime: ", checkOutTime, "(sec) = ", str(datetime.timedelta(seconds=checkOutTime)), "o'clock")
+		
 		# Get variables ready for the next iteration
 		timeBefore = checkOutTime
 		poisVisited[i] = newP
@@ -554,22 +563,12 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 		checkOutTimes[i] = checkOutTime
 		transportDurations[i] = duration
 		transportDistances[i] = distance
-		# if debug:
-		# 	print("categories: ", newP['categories'])
-		# for categ in newP['categories']:
-		# 	if categ not in categoriesVisited:categoriesVisited.append(categ)
-		# print(categoriesVisited)
 		p = newP
 		if p in poisInRange:
 			poisInRange.remove(p)
 
-	##################################################
-	# Step 3: Sum up of the trajectory - Maps Static API
-
-	# APOFASISE AN THA BRISKEI TO STATIC MAP EDW H OXI
-
 	if debug:
-		print("\n\nStep 3: Sum up of the trajectory:")
+		print("\n\nSum up of the trajectory:")
 		sleep(1)
 		print("\tAll the POIs that were visited:")
 		for i in range(len(poisVisited)):
@@ -578,13 +577,15 @@ def findTrajectoryPerDay(categories, input_consts, input_vars):
 		for i in range(len(poisVisited)):
 			print(str(datetime.timedelta(seconds=transportDurations[i])))
 
-	return (poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances)
+	isOK = True
+	return (isOK, poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances)
 
 
 def generate_trajectories_per_user(categories, regions, input_consts, user_no, time_period, json_file):
 	# Variables 
 	(userProfile, home, region, work, categPossibilities, meanCheckInDur) = setup_user_profil(regions)
-	
+	educationalDegrees = getAllEducationDegrees()
+	(isWorking, workPlace, workingDuration) = work
 	poisInRange = my_neo4j_driver.neo4j_find_POIs_in_range(home, input_consts[0], region)
 	
 	input_vars = (home, work, region, poisInRange, categPossibilities, meanCheckInDur)
@@ -597,13 +598,38 @@ def generate_trajectories_per_user(categories, regions, input_consts, user_no, t
 	transportDistances = {}
 
 	userDict = {"user":str(user_no)}
+	userDict["age"] = userProfile[0]
+	userDict["gender"] = userProfile[1]
+	userDict["education"] = educationalDegrees[userProfile[2]]
+	userDict["isWorking"] = isWorking
+	userDict["workingDuration"] = 0
+	userDict["workPlace"] = {}
+	if isWorking:
+		userDict["workingDuration"] = workingDuration
+		userDict["workPlace"]['name']        = workPlace['name']
+		userDict["workPlace"]['business_id'] = workPlace['business_id']
+		userDict["workPlace"]['state']       = workPlace['state']
+		userDict["workPlace"]['postal_code'] = workPlace['postal_code']
+		userDict["workPlace"]['city']        = workPlace['city']
+		userDict["workPlace"]['address']     = workPlace['address']
+		userDict["workPlace"]['coordinates'] = workPlace['coordinates']
+		userDict["workPlace"]['categories']  = workPlace['categories']
 	userDict["days"] = {} 
 	if debug:
 		print(userDict)
 	
-	for day in range(time_period):
-		(poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances) = findTrajectoryPerDay(categories, input_consts, input_vars)
+	current_user_image_folder = result_folder+"images/user_" + str(user_no) + "/"
+	if not os.path.exists(os.path.dirname(current_user_image_folder)):
+	    try:
+	        os.makedirs(os.path.dirname(current_user_image_folder))
+	    except OSError as exception:
+	        raise
 
+	for day in range(time_period):
+		(isOK, poisVisited, purpose, checkInTimes, checkOutTimes, transportDurations, transportDistances) = findTrajectoryPerDay(categories, input_consts, input_vars)
+		if not isOK:
+			print("User", user_no, "omitted. Problem with Google Directions API.")
+			return False
 		userDict["days"][day] = {}
 		userDict["days"][day]["total_pois_visited"]=len(poisVisited)
 		userDict["days"][day]["pois_visited"]={}
@@ -632,9 +658,14 @@ def generate_trajectories_per_user(categories, regions, input_consts, user_no, t
 			if debug:
 				print(userDict['days'][day]["pois_visited"][poi])
 				print(poisVisited[poi]['name'], ":", str(poisVisited[poi]['coordinates'].latitude) + "," + str(str(poisVisited[poi]['coordinates'].longitude)))
-		my_google_maps_api.static_map_api(str(result_folder+"images/staticmap_"), user_no, day, poisVisited) # pois visited this day.
+		isOK = my_google_maps_api.static_map_api(str(current_user_image_folder+"staticmap_day_"), user_no, day, poisVisited) # pois visited this day.
+		if not isOK:
+			print("User", user_no, "omitted. Problem with Google Static Maps API.")
+			shutil.rmtree(current_user_image_folder, ignore_errors=False)
+			return False
 	userJSON = json.dumps(userDict)
 	json_file.write(userJSON+"\n")
+	return True
 
 def data_generator():
 	# The final categories are going to be used later on
@@ -668,25 +699,16 @@ def data_generator():
 	time_period   = args.timePeriod   if args.timePeriod   else DAYSPER['2months']
 	startUser     = args.startUserNum if args.startUserNum else 0
 	endUser       = args.endUserNum   if args.endUserNum   else startUser+numberOfUsers
-
-	print(maxDist)
-	print(startTime)
-	print(endTime)
-	print(chkNum)
-	print(stdDevCheckIn)
-	print(time_period)
-	print(numberOfUsers)
-	print(startUser)
-	print(endUser)
-	exit()
 	
 	input_consts  = (maxDist, startTime, endTime, chkNum, stdDevCheckIn)
 	
 	json_fle = "dataset_" + str(startUser) + "_" + str(endUser) + ".json"
 	with open(result_folder + json_fle, 'w', encoding='utf-8') as json_file:
 		for user_no in range(startUser, endUser):
-			generate_trajectories_per_user(final_categories, regions, input_consts, user_no, time_period, json_file)
-			if user_no % 10 == 0:print("user:", user_no)
+			isOK = generate_trajectories_per_user(final_categories, regions, input_consts, user_no, time_period, json_file)
+			if not isOK:
+				exit()
+			if user_no % 5 == 0:print("user:", user_no)
 	print("Done")
 
 # # # # # # # # # # End of Main Functions # # # # # # # # # #
