@@ -688,7 +688,7 @@ def data_generator():
 	DEFAULT_ENDTTIME  = 79200 # = 22:00 The end of the day (sec)
 	DEFAULT_CHKINNUM  = 10 # The max number of checkins 
 	DEFAULT_STDDEV    = 3600 # 1 hour standard deviation
-	DEFAULT_USERSNUM  = 50
+	DEFAULT_USERSNUM  = 1000
 
 	maxDist       = args.maxDistance  if args.maxDistance  else DEFAULT_MAXDIST
 	startTime     = args.startTime    if args.startTime    else DEFAULT_STARTTIME
